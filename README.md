@@ -1,3 +1,8 @@
+(note: this project isn't a "real" project, it has been created to test Claude 4 capabilities)
+
+
+------
+
 # Boss AI Trainer 🤖
 
 A cutting-edge browser-based robotics simulation platform for training neural networks to control humanoid robots. Built with Next.js, React Three Fiber, TensorFlow.js, and advanced physics simulation.
