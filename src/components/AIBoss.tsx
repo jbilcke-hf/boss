@@ -45,6 +45,9 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
   const episodeCount = useRef(0)
   const episodeFitnessSum = useRef(0)
   const episodeSamples = useRef(0)
+  const episodeStartState = useRef<number[] | null>(null)
+  const episodeActions = useRef<number[][]>([])
+  const episodeStarted = useRef(false)
   
   // Boundary limits for training area
   const BOUNDARY_LIMITS = {
@@ -108,10 +111,21 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       episodeCount.current++
       console.log(`Episode ${episodeCount.current} complete - Avg fitness: ${avgEpisodeFitness.toFixed(2)}`)
       
+      // Add single training sample for the entire episode
+      if (episodeStartState.current && episodeActions.current.length > 0 && controller.isInitialized) {
+        // Use the final action sequence and average fitness for this episode
+        const finalAction = episodeActions.current[episodeActions.current.length - 1] || [0, 0, 0, 0, 0, 0, 0, 0]
+        controller.addTrainingSample(episodeStartState.current, finalAction, avgEpisodeFitness)
+        console.log(`Training sample added for episode ${episodeCount.current} - Actions: ${episodeActions.current.length}, Fitness: ${avgEpisodeFitness.toFixed(2)}`)
+      }
+      
       // Reset episode tracking
       episodeTimer.current = 0
       episodeFitnessSum.current = 0
       episodeSamples.current = 0
+      episodeStartState.current = null
+      episodeActions.current = []
+      episodeStarted.current = false
       
       // Trigger reset via boundary exit mechanism
       onBoundaryExit?.()
@@ -131,6 +145,13 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       if (sensorData) {
         const fitness = controller.calculateFitness(sensorData)
         
+        // Capture initial state at start of episode
+        if (!episodeStarted.current) {
+          episodeStartState.current = sensorData.slice(0, 24)
+          episodeStarted.current = true
+          episodeActions.current = []
+        }
+        
         // Track episode fitness
         episodeFitnessSum.current += fitness
         episodeSamples.current++
@@ -147,11 +168,8 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
         const action = await controller.predict(sensorData)
         setCurrentAction(action)
 
-        // Calculate fitness and add training sample
-        if (lastSensorData.current) {
-          const fitness = controller.calculateFitness(sensorData)
-          controller.addTrainingSample((lastSensorData.current as any).slice(0, 24), currentAction, fitness)
-        }
+        // Track actions during episode (but don't add training samples yet)
+        episodeActions.current.push([...action])
 
         lastSensorData.current = sensorData as any
       }

@@ -313,7 +313,7 @@ export class BossController {
     if (fitness > this.bestFitness) {
       this.bestFitness = fitness
       this.bestAction = [...action]
-      console.log(`New best fitness: ${fitness.toFixed(2)}`)
+      console.log(`New best episode fitness: ${fitness.toFixed(2)}`)
     }
     
     // Keep only recent samples and history
@@ -332,7 +332,7 @@ export class BossController {
     if (!this.model || this.trainingData.length < 30) return
 
     this.isTraining = true
-    console.log('Training Boss AI with', this.trainingData.length, 'samples...')
+    console.log('Training Boss AI with', this.trainingData.length, 'episode samples (not frame samples)...')
     
     // Filter and weight samples by fitness
     const sortedSamples = this.trainingData
