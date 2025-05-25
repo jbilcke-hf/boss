@@ -113,8 +113,8 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       episodeCount.current++
       console.log(`Episode ${episodeCount.current} complete - Avg fitness: ${avgEpisodeFitness.toFixed(2)}`)
       
-      // Add single training sample for the entire episode
-      if (episodeStartState.current && episodeActions.current.length > 0 && controller.isInitialized) {
+      // Add single training sample for the entire episode (only if training is active)
+      if (episodeStartState.current && episodeActions.current.length > 0 && controller.isInitialized && controller.trainingActive) {
         // Use the final action sequence and average fitness for this episode
         const finalAction = episodeActions.current[episodeActions.current.length - 1] || [0, 0, 0, 0, 0, 0, 0, 0]
         controller.addTrainingSample(episodeStartState.current, finalAction, avgEpisodeFitness)
@@ -134,9 +134,9 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       return
     }
 
-    // Train model every 15 seconds (scaled by simulation speed) after several episodes
-    const trainingTimeout = 15.0 / simulationSpeed
-    if (trainingTimer.current > trainingTimeout && !controller.isTraining) {
+    // Train model every 10 seconds (scaled by simulation speed) when training is active
+    const trainingTimeout = 10.0 / simulationSpeed
+    if (trainingTimer.current > trainingTimeout && !controller.isTraining && controller.trainingActive && controller.trainingData.length >= 3) {
       controller.trainModel()
       trainingTimer.current = 0
     }
@@ -148,8 +148,8 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       if (sensorData) {
         const fitness = controller.calculateFitness(sensorData)
         
-        // Capture initial state at start of episode
-        if (!episodeStarted.current) {
+        // Capture initial state at start of episode (only if training is active)
+        if (!episodeStarted.current && controller.trainingActive) {
           episodeStartState.current = sensorData.slice(0, 24)
           episodeStarted.current = true
           episodeActions.current = []
@@ -171,8 +171,10 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
         const action = await controller.predict(sensorData)
         setCurrentAction(action)
 
-        // Track actions during episode (but don't add training samples yet)
-        episodeActions.current.push([...action])
+        // Track actions during episode (only when training is active)
+        if (controller.trainingActive) {
+          episodeActions.current.push([...action])
+        }
 
         lastSensorData.current = sensorData as any
       }

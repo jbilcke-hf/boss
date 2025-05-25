@@ -31,6 +31,7 @@ export class BossController {
   fitnessHistory: number[] = [];
   bestAction: number[] | null = null;
   bestFitness: number = 0;
+  trainingActive: boolean = false; // Whether training is currently active
 
   constructor(robotType: RobotType = ROBOT_TYPES.BIPED) {
     this.robotType = robotType
@@ -304,8 +305,10 @@ export class BossController {
     return action
   }
 
-  // Add training sample with fitness tracking
+  // Add training sample with fitness tracking (only during active training)
   addTrainingSample(state: number[], action: number[], fitness: number): void {
+    if (!this.trainingActive) return // Only collect samples during active training
+    
     this.trainingData.push({ state, action, fitness })
     this.fitnessHistory.push(fitness)
     
@@ -327,9 +330,24 @@ export class BossController {
     this.lastFitness = fitness
   }
 
+  // Start continuous training mode
+  startTraining(): void {
+    if (!this.isInitialized) {
+      this.createModel()
+    }
+    this.trainingActive = true
+    console.log('🎯 Training started - Boss will learn continuously')
+  }
+  
+  // Pause continuous training mode
+  pauseTraining(): void {
+    this.trainingActive = false
+    console.log('⏸️ Training paused')
+  }
+  
   // Train the model using collected data with fitness-weighted approach
   async trainModel(): Promise<void> {
-    if (!this.model || this.trainingData.length < 30) return
+    if (!this.model || this.trainingData.length < 5) return
 
     this.isTraining = true
     console.log('Training Boss AI with', this.trainingData.length, 'episode samples (not frame samples)...')
@@ -340,7 +358,7 @@ export class BossController {
       .sort((a, b) => b.fitness - a.fitness) // Best first
       .slice(0, 200) // Take best 200 samples
     
-    if (sortedSamples.length < 10) {
+    if (sortedSamples.length < 3) {
       console.log('Not enough good samples for training yet')
       this.isTraining = false
       return

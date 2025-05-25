@@ -122,7 +122,7 @@ export function AIControlPanel({ controller, currentState: _currentState, sensor
       
       <div className="space-y-1">
         <div>Status: {isModelReady ? '✅ Ready' : '🔄 Loading...'}</div>
-        <div>Training: {controller.isTraining ? '🎯 Active' : '⏸️ Idle'}</div>
+        <div>Training: {controller.trainingActive ? '🎯 Active' : '⏸️ Idle'}</div>
         <div>Samples: {trainingStats.samples}</div>
         <div>Fitness: {trainingStats.fitness}</div>
         {trainingStats.samples > 0 && (
@@ -186,17 +186,21 @@ export function AIControlPanel({ controller, currentState: _currentState, sensor
 
       <div className="flex flex-col gap-2">
         <button
-          onClick={handleTrain}
-          disabled={controller.isTraining || trainingStats.samples < 50}
-          className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-3 py-1 rounded text-xs font-medium transition-colors"
+          onClick={() => controller.trainingActive ? controller.pauseTraining() : controller.startTraining()}
+          disabled={!isModelReady}
+          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+            controller.trainingActive 
+              ? 'bg-orange-600 hover:bg-orange-700' 
+              : 'bg-blue-600 hover:bg-blue-700'
+          } disabled:bg-gray-600`}
         >
-          {controller.isTraining ? 'Training...' : `Train AI (${Math.max(0, 50 - trainingStats.samples)} more needed)`}
+          {controller.trainingActive ? '⏸️ Pause Training' : '▶️ Start Training'}
         </button>
         
         <button
           onClick={handleExportModel}
-          disabled={!controller.isInitialized || controller.isTraining || trainingStats.samples < 10}
-          className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 px-3 py-1 rounded text-xs font-medium transition-colors"
+          disabled={!controller.isInitialized || controller.isTraining || trainingStats.samples < 3}
+          className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 px-3 py-1 rounded text-xs font-medium transition-colors"
         >
           📦 Export Model (.safetensors)
         </button>
