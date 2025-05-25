@@ -1,8 +1,11 @@
 import { OrbitControls, Grid, Box } from '@react-three/drei'
 import { Physics, RigidBody } from '@react-three/rapier'
 import { AIBoss } from './AIBoss'
+import { AIQuadBoss } from './AIQuadBoss'
+import { AISpiderBoss } from './AISpiderBoss'
 import { CanvasCapture } from './CanvasCapture'
 import { BossController } from './BossController'
+import { RobotType } from '@/lib/robotTypes'
 
 interface SceneProps {
   resetKey: number;
@@ -12,10 +15,11 @@ interface SceneProps {
   onCapture: (pixels: Uint8Array) => void;
   isCapturing: boolean;
   simulationSpeed: number;
+  robotType: RobotType;
 }
 
 // Main scene with enhanced AI and sensor feedback
-export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onCapture, isCapturing, simulationSpeed }: SceneProps) {
+export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onCapture, isCapturing, simulationSpeed, robotType }: SceneProps) {
   return (
     <Physics 
       gravity={[0, -9.81, 0]} 
@@ -65,17 +69,47 @@ export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onC
       </group>
       
       {/* Enhanced AI Boss with full sensor suite */}
-      <AIBoss 
-        key={resetKey} 
-        controller={controller} 
-        onStateUpdate={onStateUpdate}
-        onSensorUpdate={onSensorUpdate}
-        simulationSpeed={simulationSpeed}
-        onBoundaryExit={() => {
-          // Trigger a reset by incrementing the resetKey
-          window.dispatchEvent(new CustomEvent('ragdollBoundaryExit'))
-        }}
-      />
+      {robotType.id === 'biped' && (
+        <AIBoss 
+          key={resetKey} 
+          controller={controller} 
+          onStateUpdate={onStateUpdate}
+          onSensorUpdate={onSensorUpdate}
+          simulationSpeed={simulationSpeed}
+          onBoundaryExit={() => {
+            // Trigger a reset by incrementing the resetKey
+            window.dispatchEvent(new CustomEvent('ragdollBoundaryExit'))
+          }}
+        />
+      )}
+      
+      {robotType.id === 'quadruped' && (
+        <AIQuadBoss 
+          key={resetKey} 
+          controller={controller} 
+          onStateUpdate={onStateUpdate}
+          onSensorUpdate={onSensorUpdate}
+          simulationSpeed={simulationSpeed}
+          onBoundaryExit={() => {
+            // Trigger a reset by incrementing the resetKey
+            window.dispatchEvent(new CustomEvent('ragdollBoundaryExit'))
+          }}
+        />
+      )}
+      
+      {robotType.id === 'spider' && (
+        <AISpiderBoss 
+          key={resetKey} 
+          controller={controller} 
+          onStateUpdate={onStateUpdate}
+          onSensorUpdate={onSensorUpdate}
+          simulationSpeed={simulationSpeed}
+          onBoundaryExit={() => {
+            // Trigger a reset by incrementing the resetKey
+            window.dispatchEvent(new CustomEvent('ragdollBoundaryExit'))
+          }}
+        />
+      )}
       
       {/* Canvas capture for computer vision */}
       <CanvasCapture onCapture={onCapture} isCapturing={isCapturing} />

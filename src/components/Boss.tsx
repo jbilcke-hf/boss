@@ -84,9 +84,11 @@ export default function Boss() {
 
   const handleRobotTypeChange = (robotTypeId: string) => {
     setSelectedRobotType(robotTypeId)
-    // Note: This would require recreating the controller with new robot type
-    // For now, we'll just update the selection (actual robot switching not implemented)
-    console.log('Robot type changed to:', robotTypeId)
+    const newRobotType = ROBOT_TYPES[robotTypeId.toUpperCase()] || ROBOT_TYPES.BIPED
+    controller.robotType = newRobotType
+    controller.resetAll() // Reset everything when changing robot type
+    setResetKey(prev => prev + 1) // Force scene reset
+    console.log('Robot type changed to:', newRobotType.name)
   }
 
   const handleSimulationSpeedChange = (speed: number) => {
@@ -168,6 +170,7 @@ export default function Boss() {
           onCapture={handleCapture}
           isCapturing={isCapturing}
           simulationSpeed={simulationSpeed}
+          robotType={currentRobotType}
         />
       </Canvas>
     </div>

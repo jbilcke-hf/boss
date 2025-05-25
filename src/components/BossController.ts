@@ -25,13 +25,15 @@ export class BossController {
   sensorHistory: number[][] = [];
   robotType: RobotType;
   modelName: string;
-  explorationRate: number = 0.8; // Start with high exploration
+  explorationRate: number = 0.7; // Start with high but reasonable exploration
   stepCount: number = 0;
   lastFitness: number = 0;
   fitnessHistory: number[] = [];
   bestAction: number[] | null = null;
   bestFitness: number = 0;
   trainingActive: boolean = false; // Whether training is currently active
+  lastAction: number[] = [0, 0, 0, 0, 0, 0, 0, 0]; // For action smoothing
+  maxMotorChangeRate: number = 0.05; // Much slower motor changes to prevent shaking
 
   constructor(robotType: RobotType = ROBOT_TYPES.BIPED) {
     this.robotType = robotType
@@ -44,19 +46,18 @@ export class BossController {
     
     const model = tf.sequential({
       layers: [
-        // Input layer sized for robot type
-        tf.layers.dense({ inputShape: [sensorCount], units: 64, activation: 'relu', name: 'input_layer' }),
-        tf.layers.dropout({ rate: 0.2, name: 'dropout_1' }),
-        tf.layers.dense({ units: 32, activation: 'relu', name: 'hidden_1' }),
-        tf.layers.dropout({ rate: 0.2, name: 'dropout_2' }),
-        tf.layers.dense({ units: 16, activation: 'relu', name: 'hidden_2' }),
-        // Output layer sized for robot type
+        // Simpler architecture for better exploration and learning
+        tf.layers.dense({ inputShape: [sensorCount], units: 32, activation: 'relu', name: 'input_layer' }),
+        tf.layers.dropout({ rate: 0.1, name: 'dropout_1' }),
+        tf.layers.dense({ units: 16, activation: 'relu', name: 'hidden_1' }),
+        tf.layers.dropout({ rate: 0.1, name: 'dropout_2' }),
+        // Output layer with tanh activation for smooth motor control (-1 to 1)
         tf.layers.dense({ units: motorCount, activation: 'tanh', name: 'output_layer' })
       ]
     })
 
     model.compile({
-      optimizer: tf.train.adam(0.0005),
+      optimizer: tf.train.adam(0.001), // Higher learning rate for faster adaptation
       loss: 'meanSquaredError',
       metrics: ['mse']
     })
@@ -106,19 +107,152 @@ export class BossController {
     return { success: false, error: 'Loading not yet implemented' }
   }
 
-  // Comprehensive sensor data collection
+  // Get limb positions based on robot type
+  private getLimbPositions(bossRefs: any): any {
+    const positions: any = {}
+    
+    if (this.robotType.id === 'biped') {
+      positions.leftThigh = bossRefs.leftThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.rightThigh = bossRefs.rightThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.leftFoot = bossRefs.leftFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.rightFoot = bossRefs.rightFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+    } else if (this.robotType.id === 'quadruped') {
+      positions.frontLeftThigh = bossRefs.frontLeftThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.frontRightThigh = bossRefs.frontRightThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backLeftThigh = bossRefs.backLeftThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backRightThigh = bossRefs.backRightThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.frontLeftFoot = bossRefs.frontLeftFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.frontRightFoot = bossRefs.frontRightFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backLeftFoot = bossRefs.backLeftFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backRightFoot = bossRefs.backRightFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+    } else if (this.robotType.id === 'spider') {
+      positions.frontLeftThigh = bossRefs.frontLeftThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.frontRightThigh = bossRefs.frontRightThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.midLeftThigh = bossRefs.midLeftThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.midRightThigh = bossRefs.midRightThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backLeftThigh = bossRefs.backLeftThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backRightThigh = bossRefs.backRightThigh?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.frontLeftFoot = bossRefs.frontLeftFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.frontRightFoot = bossRefs.frontRightFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.midLeftFoot = bossRefs.midLeftFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.midRightFoot = bossRefs.midRightFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backLeftFoot = bossRefs.backLeftFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+      positions.backRightFoot = bossRefs.backRightFoot?.current?.translation() || { x: 0, y: 0, z: 0 }
+    }
+    
+    return positions
+  }
+
+  // Create sensor data based on robot type
+  private createSensorData(headPos: any, torsoPos: any, limbPositions: any, headVel: any, torsoVel: any, headAccel: any, torsoAccel: any, torsoRot: any, torsoAngVel: any, bossRefs: any): number[] {
+    const groundLevel = -2.0
+    const contactThreshold = 0.1
+    
+    // Common sensors for all robot types
+    const commonSensors = [
+      // Position sensors
+      headPos.y, torsoPos.y, torsoPos.x,
+      
+      // Velocity sensors
+      headVel.x, headVel.y, headVel.z,
+      torsoVel.x, torsoVel.y, torsoVel.z,
+      
+      // Acceleration sensors
+      headAccel.y, torsoAccel.x, torsoAccel.y, torsoAccel.z,
+      
+      // Rotation/orientation sensors
+      torsoRot.x, torsoRot.y, torsoRot.z, torsoRot.w,
+      
+      // Angular velocity sensors
+      torsoAngVel.x, torsoAngVel.z
+    ]
+    
+    let sensorData = [...commonSensors]
+    let groundContact: any = {}
+    
+    // Add robot-specific sensors
+    if (this.robotType.id === 'biped') {
+      const leftFootContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.leftFoot.y + contactThreshold) / contactThreshold))
+      const rightFootContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.rightFoot.y + contactThreshold) / contactThreshold))
+      
+      sensorData.push(
+        limbPositions.leftThigh.y, limbPositions.rightThigh.y,
+        leftFootContact, rightFootContact,
+        limbPositions.leftFoot.y, limbPositions.rightFoot.y
+      )
+      
+      groundContact = { left: leftFootContact, right: rightFootContact, both: leftFootContact && rightFootContact }
+      
+    } else if (this.robotType.id === 'quadruped') {
+      const frontLeftContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.frontLeftFoot.y + contactThreshold) / contactThreshold))
+      const frontRightContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.frontRightFoot.y + contactThreshold) / contactThreshold))
+      const backLeftContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.backLeftFoot.y + contactThreshold) / contactThreshold))
+      const backRightContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.backRightFoot.y + contactThreshold) / contactThreshold))
+      
+      sensorData.push(
+        limbPositions.frontLeftThigh.y, limbPositions.frontRightThigh.y,
+        limbPositions.backLeftThigh.y, limbPositions.backRightThigh.y,
+        frontLeftContact, frontRightContact, backLeftContact, backRightContact,
+        limbPositions.frontLeftFoot.y, limbPositions.frontRightFoot.y,
+        limbPositions.backLeftFoot.y, limbPositions.backRightFoot.y
+      )
+      
+      groundContact = { 
+        frontLeft: frontLeftContact, frontRight: frontRightContact,
+        backLeft: backLeftContact, backRight: backRightContact,
+        stable: (frontLeftContact + frontRightContact + backLeftContact + backRightContact) >= 3
+      }
+      
+    } else if (this.robotType.id === 'spider') {
+      const frontLeftContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.frontLeftFoot.y + contactThreshold) / contactThreshold))
+      const frontRightContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.frontRightFoot.y + contactThreshold) / contactThreshold))
+      const midLeftContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.midLeftFoot.y + contactThreshold) / contactThreshold))
+      const midRightContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.midRightFoot.y + contactThreshold) / contactThreshold))
+      const backLeftContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.backLeftFoot.y + contactThreshold) / contactThreshold))
+      const backRightContact = Math.max(0, Math.min(1, (groundLevel - limbPositions.backRightFoot.y + contactThreshold) / contactThreshold))
+      
+      sensorData.push(
+        limbPositions.frontLeftThigh.y, limbPositions.frontRightThigh.y,
+        limbPositions.midLeftThigh.y, limbPositions.midRightThigh.y,
+        limbPositions.backLeftThigh.y, limbPositions.backRightThigh.y,
+        frontLeftContact, frontRightContact, midLeftContact, midRightContact, backLeftContact, backRightContact,
+        limbPositions.frontLeftFoot.y, limbPositions.frontRightFoot.y,
+        limbPositions.midLeftFoot.y, limbPositions.midRightFoot.y,
+        limbPositions.backLeftFoot.y, limbPositions.backRightFoot.y
+      )
+      
+      groundContact = { 
+        frontLeft: frontLeftContact, frontRight: frontRightContact,
+        midLeft: midLeftContact, midRight: midRightContact,
+        backLeft: backLeftContact, backRight: backRightContact,
+        stable: (frontLeftContact + frontRightContact + midLeftContact + midRightContact + backLeftContact + backRightContact) >= 4
+      }
+    }
+    
+    // Pad or truncate to exact sensor count
+    while (sensorData.length < this.robotType.sensorCount) {
+      sensorData.push(0)
+    }
+    sensorData = sensorData.slice(0, this.robotType.sensorCount)
+    
+    // Add ground contact info to sensor data object
+    ;(sensorData as any).groundContact = groundContact
+    
+    return sensorData
+  }
+
+  // Comprehensive sensor data collection for different robot types
   getSensorData(bossRefs: any, deltaTime: number = 0.016): any {
     if (!bossRefs.head?.current || !bossRefs.torso?.current) return null
     
     const currentTime = performance.now()
     
-    // Position sensors
+    // Position sensors - adapt based on robot type
     const headPos = bossRefs.head.current.translation()
     const torsoPos = bossRefs.torso.current.translation()
-    const leftThighPos = bossRefs.leftThigh.current?.translation() || { x: 0, y: 0, z: 0 }
-    const rightThighPos = bossRefs.rightThigh.current?.translation() || { x: 0, y: 0, z: 0 }
-    const leftFootPos = bossRefs.leftFoot.current?.translation() || { x: 0, y: 0, z: 0 }
-    const rightFootPos = bossRefs.rightFoot.current?.translation() || { x: 0, y: 0, z: 0 }
+    
+    // Common limb positions for all robot types
+    const limbPositions = this.getLimbPositions(bossRefs)
     
     // Rotation sensors (quaternions converted to euler-like)
     const torsoRot = bossRefs.torso.current.rotation()
@@ -147,50 +281,8 @@ export class BossController {
       }
     }
 
-    // Calculate joint angles (simplified - distance-based approximation)
-    const leftKneeAngle = Math.atan2(
-      leftThighPos.y - (bossRefs.leftShin.current?.translation().y || 0),
-      Math.abs(leftThighPos.x - (bossRefs.leftShin.current?.translation().x || 0))
-    )
-    const rightKneeAngle = Math.atan2(
-      rightThighPos.y - (bossRefs.rightShin.current?.translation().y || 0),
-      Math.abs(rightThighPos.x - (bossRefs.rightShin.current?.translation().x || 0))
-    )
-
-    // Center of mass calculation
-    const centerOfMass = {
-      x: (headPos.x + torsoPos.x + leftThighPos.x + rightThighPos.x) / 4,
-      y: (headPos.y + torsoPos.y + leftThighPos.y + rightThighPos.y) / 4,
-      z: (headPos.z + torsoPos.z + leftThighPos.z + rightThighPos.z) / 4
-    }
-
-    // Ground contact sensors (simplified)
-    const leftFootGroundContact = leftFootPos.y < -1.5 ? 1.0 : 0.0
-    const rightFootGroundContact = rightFootPos.y < -1.5 ? 1.0 : 0.0
-
-    // 24-dimensional sensor vector
-    const sensorData = [
-      // Position sensors (6)
-      headPos.y, torsoPos.y, 
-      leftThighPos.y, rightThighPos.y,
-      centerOfMass.y, torsoPos.x,
-      
-      // Velocity sensors (6)
-      headVel.x, headVel.y, headVel.z,
-      torsoVel.x, torsoVel.y, torsoVel.z,
-      
-      // Acceleration sensors (4)
-      headAccel.y, torsoAccel.x, torsoAccel.y, torsoAccel.z,
-      
-      // Rotation/orientation sensors (4)
-      torsoRot.x, torsoRot.y, torsoRot.z, torsoRot.w,
-      
-      // Angular velocity sensors (2)
-      torsoAngVel.x, torsoAngVel.z,
-      
-      // Joint angle sensors (2)
-      leftKneeAngle, rightKneeAngle
-    ]
+    // Create adaptive sensor data based on robot type
+    const sensorData = this.createSensorData(headPos, torsoPos, limbPositions, headVel, torsoVel, headAccel, torsoAccel, torsoRot, torsoAngVel, bossRefs)
 
     // Store current state for next frame's acceleration calculation
     this.previousState = {
@@ -198,13 +290,6 @@ export class BossController {
       torsoVel: { x: torsoVel.x, y: torsoVel.y, z: torsoVel.z },
       timestamp: currentTime
     } as PreviousState
-
-    // Add ground contact info to state
-    (sensorData as any).groundContact = {
-      left: leftFootGroundContact,
-      right: rightFootGroundContact,
-      both: leftFootGroundContact && rightFootGroundContact
-    }
 
     return sensorData
   }
@@ -263,23 +348,25 @@ export class BossController {
     return Math.max(0, Math.min(100, fitness)) // Clamp between 0-100
   }
 
-  // Generate enhanced motor control actions with exploration
+  // Generate enhanced motor control actions with exploration and smoothing
   async predict(sensorData: number[]): Promise<number[]> {
     this.stepCount++
     
     if (!this.model || !sensorData || sensorData.length < this.robotType.sensorCount) {
       // Return gentle random actions for exploration
-      return this.generateExplorationAction()
+      const action = this.generateExplorationAction()
+      this.lastAction = [...action]
+      return action
     }
     
-    // Decay exploration rate over time
+    // Decay exploration rate gradually to let neural network take over
     this.explorationRate = Math.max(0.1, this.explorationRate * 0.999)
     
-    let action: number[]
+    let rawAction: number[]
     
     if (Math.random() < this.explorationRate) {
       // Exploration: try random actions
-      action = this.generateExplorationAction()
+      rawAction = this.generateExplorationAction()
     } else {
       // Exploitation: use neural network prediction
       const stateTensor = tf.tensor2d([sensorData.slice(0, this.robotType.sensorCount)])
@@ -289,18 +376,36 @@ export class BossController {
       stateTensor.dispose()
       prediction.dispose()
       
-      action = Array.from(result)
+      rawAction = Array.from(result)
     }
     
-    return action
+    // Apply motor speed limiting to prevent rapid shaking
+    const speedLimitedAction = rawAction.map((newVal, i) => {
+      const currentVal = this.lastAction[i]
+      const maxChange = this.maxMotorChangeRate
+      const requestedChange = newVal - currentVal
+      
+      // Clamp the change to maximum allowed rate
+      const limitedChange = Math.max(-maxChange, Math.min(maxChange, requestedChange))
+      return currentVal + limitedChange
+    })
+    
+    // Apply lighter smoothing on top of speed limiting
+    const smoothingFactor = 0.3
+    const smoothedAction = speedLimitedAction.map((newVal, i) => 
+      this.lastAction[i] * smoothingFactor + newVal * (1 - smoothingFactor)
+    )
+    
+    this.lastAction = [...smoothedAction]
+    return smoothedAction
   }
   
-  // Generate gentle random exploration actions
+  // Generate pure random exploration actions - let the neural network learn everything
   private generateExplorationAction(): number[] {
     const action = []
     for (let i = 0; i < this.robotType.motorCount; i++) {
-      // Generate small random values for gentle exploration
-      action.push((Math.random() - 0.5) * 0.5) // Range: -0.25 to 0.25
+      // Pure random values - no hardcoded patterns
+      action.push((Math.random() - 0.5) * 2.0) // Range: -1.0 to 1.0 (full motor range)
     }
     return action
   }

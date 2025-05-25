@@ -57,14 +57,14 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
     z: 15   // ±15 units in Z
   }
 
-  // Physics Joints
-  useSphericalJoint(bossRefs.head, bossRefs.torso, [[0, -0.2, 0], [0, 0.4, 0]])
-  useSphericalJoint(bossRefs.leftThigh, bossRefs.torso, [[0, 0.25, 0], [-0.15, -0.4, 0]])
-  useSphericalJoint(bossRefs.leftShin, bossRefs.leftThigh, [[0, 0.2, 0], [0, -0.25, 0]])
-  useSphericalJoint(bossRefs.leftFoot, bossRefs.leftShin, [[0, 0.025, -0.05], [0, -0.2, 0]])
-  useSphericalJoint(bossRefs.rightThigh, bossRefs.torso, [[0, 0.25, 0], [0.15, -0.4, 0]])
-  useSphericalJoint(bossRefs.rightShin, bossRefs.rightThigh, [[0, 0.2, 0], [0, -0.25, 0]])
-  useSphericalJoint(bossRefs.rightFoot, bossRefs.rightShin, [[0, 0.025, -0.05], [0, -0.2, 0]])
+  // More human-like joint positioning and constraints
+  useSphericalJoint(bossRefs.head, bossRefs.torso, [[0, -0.15, 0], [0, 0.35, 0]])
+  useSphericalJoint(bossRefs.leftThigh, bossRefs.torso, [[0, 0.2, 0], [-0.12, -0.35, 0]])
+  useSphericalJoint(bossRefs.leftShin, bossRefs.leftThigh, [[0, 0.22, 0], [0, -0.22, 0]])
+  useSphericalJoint(bossRefs.leftFoot, bossRefs.leftShin, [[0, 0.02, -0.03], [0, -0.18, 0]])
+  useSphericalJoint(bossRefs.rightThigh, bossRefs.torso, [[0, 0.2, 0], [0.12, -0.35, 0]])
+  useSphericalJoint(bossRefs.rightShin, bossRefs.rightThigh, [[0, 0.22, 0], [0, -0.22, 0]])
+  useSphericalJoint(bossRefs.rightFoot, bossRefs.rightShin, [[0, 0.02, -0.03], [0, -0.18, 0]])
 
   // Check if ragdoll is within boundaries
   const checkBoundaries = () => {
@@ -161,7 +161,7 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
         
         onStateUpdate(sensorData)
         onSensorUpdate({
-          sensors: sensorData.slice(0, 24),
+          sensors: sensorData.slice(0, 28),
           groundContact: (sensorData as any).groundContact,
           fitness: fitness
         })
@@ -182,65 +182,91 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       actionTimer.current = 0
     }
 
-    // Apply gentle AI motor controls to Boss (only after settling)
+    // Apply 8-motor control system with very gentle forces
     if (bossRefs.torso.current && currentAction.length >= 8 && isSettled) {
-      const [torqueX, torqueY, torqueZ, forceStrength, 
-             leftLegTorque, rightLegTorque, balanceX, balanceZ] = currentAction
+      const [leftHipTorque, rightHipTorque, leftKneeTorque, rightKneeTorque,
+             leftAnkleTorque, rightAnkleTorque, torsoStabilize, headStabilize] = currentAction
       
       try {
-        // DISABLED: All artificial forces causing unnatural physics
-        // The upward Y force was creating "reverse gravity" effect
-        // Making the biped bounce to the sky after hitting ground
-        /*
-        const mainForce = {
-          x: 0,
-          y: Math.max(0, torqueY * forceStrength * 0.2), // This was the culprit!
-          z: 0
+        const motorStrength = 0.00625 // Half the previous speed (0.0125 / 2)
+        
+        // Hip motors (torso-thigh joints) - for stepping and balance
+        if (bossRefs.leftThigh?.current && Math.abs(leftHipTorque) > 0.02) {
+          const hipTorque = {
+            x: leftHipTorque * motorStrength * 0.4,
+            y: 0,
+            z: leftHipTorque * motorStrength * 0.2
+          }
+          bossRefs.leftThigh.current.addTorque(hipTorque, true)
         }
         
-        if (bossRefs.torso.current && typeof bossRefs.torso.current.addForce === 'function') {
-          bossRefs.torso.current.addForce(mainForce, true)
-        }
-        */
-
-        // DISABLED: Balance torques also causing unnatural motion
-        // These torques were contributing to the "wind" effect
-        /*
-        const balanceTorque = {
-          x: balanceX * 0.1,
-          y: 0,
-          z: balanceZ * 0.1
+        if (bossRefs.rightThigh?.current && Math.abs(rightHipTorque) > 0.02) {
+          const hipTorque = {
+            x: rightHipTorque * motorStrength * 0.4,
+            y: 0,
+            z: rightHipTorque * motorStrength * 0.2
+          }
+          bossRefs.rightThigh.current.addTorque(hipTorque, true)
         }
         
-        if (bossRefs.torso.current && typeof bossRefs.torso.current.addTorque === 'function') {
-          bossRefs.torso.current.addTorque(balanceTorque, true)
-        }
-        */
-
-        // DISABLED: Leg motor controls causing helicopter effect
-        // These horizontal forces on thighs were creating unnatural propulsion
-        // and making the biped "fly" like helicopter blades
-        /* 
-        if (bossRefs.leftThigh?.current && Math.abs(leftLegTorque) > 0.05 && 
-            typeof bossRefs.leftThigh.current.addForce === 'function') {
-          const leftLegForce = {
-            x: leftLegTorque * 0.2,
+        // Knee motors (thigh-shin joints) - for leg bending
+        if (bossRefs.leftShin?.current && Math.abs(leftKneeTorque) > 0.02) {
+          const kneeTorque = {
+            x: leftKneeTorque * motorStrength * 0.3,
             y: 0,
             z: 0
           }
-          bossRefs.leftThigh.current.addForce(leftLegForce, true)
+          bossRefs.leftShin.current.addTorque(kneeTorque, true)
         }
-
-        if (bossRefs.rightThigh?.current && Math.abs(rightLegTorque) > 0.05 && 
-            typeof bossRefs.rightThigh.current.addForce === 'function') {
-          const rightLegForce = {
-            x: rightLegTorque * 0.2,
+        
+        if (bossRefs.rightShin?.current && Math.abs(rightKneeTorque) > 0.02) {
+          const kneeTorque = {
+            x: rightKneeTorque * motorStrength * 0.3,
             y: 0,
             z: 0
           }
-          bossRefs.rightThigh.current.addForce(rightLegForce, true)
+          bossRefs.rightShin.current.addTorque(kneeTorque, true)
         }
-        */
+        
+        // Ankle motors (shin-foot joints) - for foot positioning and balance
+        if (bossRefs.leftFoot?.current && Math.abs(leftAnkleTorque) > 0.02) {
+          const ankleTorque = {
+            x: leftAnkleTorque * motorStrength * 0.2,
+            y: 0,
+            z: leftAnkleTorque * motorStrength * 0.1
+          }
+          bossRefs.leftFoot.current.addTorque(ankleTorque, true)
+        }
+        
+        if (bossRefs.rightFoot?.current && Math.abs(rightAnkleTorque) > 0.02) {
+          const ankleTorque = {
+            x: rightAnkleTorque * motorStrength * 0.2,
+            y: 0,
+            z: rightAnkleTorque * motorStrength * 0.1
+          }
+          bossRefs.rightFoot.current.addTorque(ankleTorque, true)
+        }
+        
+        // Torso stabilization motor - gentle balance correction
+        if (bossRefs.torso?.current && Math.abs(torsoStabilize) > 0.02) {
+          const stabTorque = {
+            x: torsoStabilize * motorStrength * 0.1,
+            y: 0,
+            z: torsoStabilize * motorStrength * 0.1
+          }
+          bossRefs.torso.current.addTorque(stabTorque, true)
+        }
+        
+        // Head stabilization motor - very gentle
+        if (bossRefs.head?.current && Math.abs(headStabilize) > 0.02) {
+          const headTorque = {
+            x: headStabilize * motorStrength * 0.05,
+            y: 0,
+            z: headStabilize * motorStrength * 0.05
+          }
+          bossRefs.head.current.addTorque(headTorque, true)
+        }
+        
       } catch (error) {
         // Silently handle physics errors to prevent crashes
         console.warn('Physics update error:', error)
@@ -250,102 +276,102 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
 
   return (
     <group position={[0, 0, 0]}>
-      {/* Head */}
+      {/* Head - more proportional */}
       <RigidBody 
         ref={bossRefs.head} 
-        mass={0.5} 
-        position={[0, 0.6, 0]}
+        mass={0.4} 
+        position={[0, 0.55, 0]}
         friction={0.8}
         restitution={0.1}
       >
-        <Sphere args={[0.2]}>
+        <Sphere args={[0.18]}>
           <meshStandardMaterial color="#f39c12" />
         </Sphere>
       </RigidBody>
       
-      {/* Torso - Main control point */}
+      {/* Torso - more human proportions */}
       <RigidBody 
         ref={bossRefs.torso} 
-        mass={2} 
+        mass={2.5} 
         position={[0, 0, 0]}
         friction={0.8}
         restitution={0.1}
       >
-        <Box args={[0.4, 0.8, 0.2]}>
+        <Box args={[0.35, 0.7, 0.18]}>
           <meshStandardMaterial color="#4a90e2" />
         </Box>
       </RigidBody>
 
-      {/* Left Leg */}
+      {/* Left Leg - more human proportions */}
       <RigidBody 
         ref={bossRefs.leftThigh} 
-        mass={1.2} 
-        position={[-0.15, -0.3, 0]}
+        mass={1.0} 
+        position={[-0.12, -0.28, 0]}
         friction={0.8}
         restitution={0.1}
       >
-        <Box args={[0.12, 0.5, 0.12]}>
+        <Box args={[0.11, 0.44, 0.11]}>
           <meshStandardMaterial color="#27ae60" />
         </Box>
       </RigidBody>
       
       <RigidBody 
         ref={bossRefs.leftShin} 
-        mass={0.8} 
-        position={[-0.15, -0.85, 0]}
+        mass={0.7} 
+        position={[-0.12, -0.78, 0]}
         friction={0.8}
         restitution={0.1}
       >
-        <Box args={[0.1, 0.4, 0.1]}>
+        <Box args={[0.09, 0.36, 0.09]}>
           <meshStandardMaterial color="#27ae60" />
         </Box>
       </RigidBody>
       
       <RigidBody 
         ref={bossRefs.leftFoot} 
-        mass={0.4} 
-        position={[-0.15, -1.15, 0.05]}
+        mass={0.3} 
+        position={[-0.12, -1.05, 0.03]}
         friction={1.2}
         restitution={0.05}
       >
-        <Box args={[0.15, 0.05, 0.25]}>
+        <Box args={[0.13, 0.04, 0.22]}>
           <meshStandardMaterial color="#8e44ad" />
         </Box>
       </RigidBody>
 
-      {/* Right Leg */}
+      {/* Right Leg - more human proportions */}
       <RigidBody 
         ref={bossRefs.rightThigh} 
-        mass={1.2} 
-        position={[0.15, -0.3, 0]}
+        mass={1.0} 
+        position={[0.12, -0.28, 0]}
         friction={0.8}
         restitution={0.1}
       >
-        <Box args={[0.12, 0.5, 0.12]}>
+        <Box args={[0.11, 0.44, 0.11]}>
           <meshStandardMaterial color="#27ae60" />
         </Box>
       </RigidBody>
       
       <RigidBody 
         ref={bossRefs.rightShin} 
-        mass={0.8} 
-        position={[0.15, -0.85, 0]}
+        mass={0.7} 
+        position={[0.12, -0.78, 0]}
         friction={0.8}
         restitution={0.1}
       >
-        <Box args={[0.1, 0.4, 0.1]}>
+        <Box args={[0.09, 0.36, 0.09]}>
           <meshStandardMaterial color="#27ae60" />
         </Box>
       </RigidBody>
       
       <RigidBody 
         ref={bossRefs.rightFoot} 
-        mass={0.4} 
-        position={[0.15, -1.15, 0.05]}
+        mass={0.3} 
+        position={[0.12, -1.05, 0.03]}
         friction={1.2}
         restitution={0.05}
       >
-        <Box args={[0.15, 0.05, 0.25]}>
+        <Box args={[0.13, 0.04, 0.22]}>
           <meshStandardMaterial color="#8e44ad" />
         </Box>
       </RigidBody>
