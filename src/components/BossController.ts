@@ -25,6 +25,12 @@ export class BossController {
   sensorHistory: number[][] = [];
   robotType: RobotType;
   modelName: string;
+  explorationRate: number = 0.8; // Start with high exploration
+  stepCount: number = 0;
+  lastFitness: number = 0;
+  fitnessHistory: number[] = [];
+  bestAction: number[] | null = null;
+  bestFitness: number = 0;
 
   constructor(robotType: RobotType = ROBOT_TYPES.BIPED) {
     this.robotType = robotType
@@ -207,7 +213,7 @@ export class BossController {
     return this.getSensorData(bossRefs, deltaTime)
   }
 
-  // Enhanced fitness function using sensor data - starts at perfect score, degrades as robot falls
+  // Enhanced fitness function optimized for 3-second episodes
   calculateFitness(sensorData: number[]): number {
     if (!sensorData || sensorData.length < 24) return 100 // Start with perfect score
     
@@ -217,98 +223,155 @@ export class BossController {
            rotX, _rotY, rotZ, _rotW, angVelX, angVelZ,
            leftKneeAngle, rightKneeAngle] = sensorData
 
-    // Start with perfect fitness and subtract penalties
-    let fitness = 100.0
+    // Base fitness for being upright - heavily weighted for short episodes
+    let fitness = 0
 
     // Target heights for optimal standing position
     const targetHeadHeight = 1.8   // Expected head height when standing
     const targetTorsoHeight = 1.0  // Expected torso height when standing
     
-    // Height penalties - lose points as robot falls
-    const headHeightPenalty = headY < targetHeadHeight * 0.8 ? 
-      Math.min(30, (targetHeadHeight - headY) * 15) : 0
+    // Primary reward: Being upright (most important for short episodes)
+    const headHeightScore = Math.max(0, 40 * (headY / targetHeadHeight))
+    const torsoHeightScore = Math.max(0, 30 * (torsoY / targetTorsoHeight))
     
-    const torsoHeightPenalty = torsoY < targetTorsoHeight * 0.7 ? 
-      Math.min(25, (targetTorsoHeight - torsoY) * 20) : 0
+    // Stability bonus - reward staying in position
+    const positionStability = Math.max(0, 15 * (1 - Math.min(1, Math.abs(torsoX) / 2)))
     
-    // Position stability penalty - lose points for drifting from center
-    const positionDrift = Math.sqrt(torsoX * torsoX + (centerMassY - targetTorsoHeight) * (centerMassY - targetTorsoHeight))
-    const positionPenalty = Math.min(15, positionDrift * 2)
-    
-    // Movement penalty - lose points for excessive motion
+    // Balance bonus - reward low movement
     const velocityMagnitude = Math.sqrt(torsoVelX * torsoVelX + torsoVelY * torsoVelY + torsoVelZ * torsoVelZ)
-    const velocityPenalty = Math.min(10, Math.max(0, velocityMagnitude - 0.3) * 8)
+    const stillnessBonus = Math.max(0, 10 * (1 - Math.min(1, velocityMagnitude / 2)))
     
-    // Angular instability penalty - lose points for wobbling/rotating
-    const angularPenalty = Math.min(15, (Math.abs(angVelX) + Math.abs(angVelZ)) * 3)
+    // Orientation bonus - reward staying vertical
+    const uprightBonus = Math.max(0, 15 * (1 - Math.abs(rotX) - Math.abs(rotZ)))
     
-    // Orientation penalty - lose points for tilting
-    const orientationPenalty = Math.min(15, (Math.abs(rotX) + Math.abs(rotZ)) * 25)
+    // Ground contact is essential - big bonus for having feet on ground
+    const groundContactBonus = (sensorData as any).groundContact?.both ? 20 : 
+                              ((sensorData as any).groundContact?.left || (sensorData as any).groundContact?.right) ? 10 : 0
     
-    // Ground contact penalty - heavy penalty for losing foot contact
-    const groundContactPenalty = !(sensorData as any).groundContact?.both ? 
-      (!(sensorData as any).groundContact?.left && !(sensorData as any).groundContact?.right ? 25 : 10) : 0
+    // Joint stability - reward natural poses
+    const jointStabilityBonus = Math.max(0, 10 * (1 - (Math.abs(leftKneeAngle) + Math.abs(rightKneeAngle)) / 2))
     
-    // Joint angle penalty - lose points for unnatural poses
-    const jointPenalty = Math.min(10, (Math.abs(leftKneeAngle) + Math.abs(rightKneeAngle)) * 2)
+    // Angular stability - reward minimal wobbling
+    const angularStabilityBonus = Math.max(0, 10 * (1 - (Math.abs(angVelX) + Math.abs(angVelZ)) / 2))
     
-    // Apply all penalties
-    fitness -= (headHeightPenalty + torsoHeightPenalty + positionPenalty + 
-               velocityPenalty + angularPenalty + orientationPenalty + 
-               groundContactPenalty + jointPenalty)
+    // Combine all fitness components - emphasize staying upright
+    fitness = headHeightScore + torsoHeightScore + positionStability + 
+              stillnessBonus + uprightBonus + groundContactBonus + 
+              jointStabilityBonus + angularStabilityBonus
 
-    return Math.max(0, fitness)
+    return Math.max(0, Math.min(100, fitness)) // Clamp between 0-100
   }
 
-  // Generate enhanced motor control actions
+  // Generate enhanced motor control actions with exploration
   async predict(sensorData: number[]): Promise<number[]> {
+    this.stepCount++
+    
     if (!this.model || !sensorData || sensorData.length < this.robotType.sensorCount) {
-      // Return default actions sized for robot type (all zeros for no forces)
-      return new Array(this.robotType.motorCount).fill(0)
+      // Return gentle random actions for exploration
+      return this.generateExplorationAction()
     }
     
-    const stateTensor = tf.tensor2d([sensorData.slice(0, this.robotType.sensorCount)])
-    const prediction = this.model.predict(stateTensor) as tf.Tensor
-    const result = await prediction.data()
+    // Decay exploration rate over time
+    this.explorationRate = Math.max(0.1, this.explorationRate * 0.999)
     
-    stateTensor.dispose()
-    prediction.dispose()
+    let action: number[]
     
-    return Array.from(result)
+    if (Math.random() < this.explorationRate) {
+      // Exploration: try random actions
+      action = this.generateExplorationAction()
+    } else {
+      // Exploitation: use neural network prediction
+      const stateTensor = tf.tensor2d([sensorData.slice(0, this.robotType.sensorCount)])
+      const prediction = this.model.predict(stateTensor) as tf.Tensor
+      const result = await prediction.data()
+      
+      stateTensor.dispose()
+      prediction.dispose()
+      
+      action = Array.from(result)
+    }
+    
+    return action
+  }
+  
+  // Generate gentle random exploration actions
+  private generateExplorationAction(): number[] {
+    const action = []
+    for (let i = 0; i < this.robotType.motorCount; i++) {
+      // Generate small random values for gentle exploration
+      action.push((Math.random() - 0.5) * 0.5) // Range: -0.25 to 0.25
+    }
+    return action
   }
 
-  // Add training sample
+  // Add training sample with fitness tracking
   addTrainingSample(state: number[], action: number[], fitness: number): void {
     this.trainingData.push({ state, action, fitness })
+    this.fitnessHistory.push(fitness)
     
-    // Keep only recent samples
+    // Track best performance
+    if (fitness > this.bestFitness) {
+      this.bestFitness = fitness
+      this.bestAction = [...action]
+      console.log(`New best fitness: ${fitness.toFixed(2)}`)
+    }
+    
+    // Keep only recent samples and history
     if (this.trainingData.length > 1000) {
       this.trainingData = this.trainingData.slice(-800)
     }
+    if (this.fitnessHistory.length > 500) {
+      this.fitnessHistory = this.fitnessHistory.slice(-400)
+    }
+    
+    this.lastFitness = fitness
   }
 
-  // Train the model using collected data
+  // Train the model using collected data with fitness-weighted approach
   async trainModel(): Promise<void> {
-    if (!this.model || this.trainingData.length < 50) return
+    if (!this.model || this.trainingData.length < 30) return
 
     this.isTraining = true
     console.log('Training Boss AI with', this.trainingData.length, 'samples...')
+    
+    // Filter and weight samples by fitness
+    const sortedSamples = this.trainingData
+      .filter(sample => sample.fitness > 20) // Only train on decent performance
+      .sort((a, b) => b.fitness - a.fitness) // Best first
+      .slice(0, 200) // Take best 200 samples
+    
+    if (sortedSamples.length < 10) {
+      console.log('Not enough good samples for training yet')
+      this.isTraining = false
+      return
+    }
 
-    // Prepare training data
-    const states = this.trainingData.map(sample => sample.state)
-    const actions = this.trainingData.map(sample => sample.action)
+    // Prepare training data - duplicate better samples
+    const states: number[][] = []
+    const actions: number[][] = []
+    
+    sortedSamples.forEach((sample, index) => {
+      const weight = Math.max(1, Math.floor(sample.fitness / 25)) // Better samples get more weight
+      for (let w = 0; w < weight; w++) {
+        states.push(sample.state.slice(0, this.robotType.sensorCount))
+        actions.push(sample.action)
+      }
+    })
     
     const xs = tf.tensor2d(states)
     const ys = tf.tensor2d(actions)
 
     try {
       await this.model.fit(xs, ys, {
-        epochs: 10,
-        batchSize: 32,
+        epochs: 5, // Reduced epochs for more frequent training
+        batchSize: 16, // Smaller batch size
         shuffle: true,
-        verbose: 0
+        verbose: 0,
+        validationSplit: 0.1
       })
-      console.log('Boss AI training complete!')
+      
+      const avgFitness = this.fitnessHistory.slice(-50).reduce((a, b) => a + b, 0) / Math.min(50, this.fitnessHistory.length)
+      console.log(`Training complete! Avg fitness: ${avgFitness.toFixed(2)}, Exploration: ${(this.explorationRate * 100).toFixed(1)}%`)
     } catch (error) {
       console.error('Training failed:', error)
     } finally {
@@ -332,6 +395,7 @@ export class BossController {
   resetPositionState(): void {
     this.previousState = null
     this.sensorHistory = []
+    // Don't reset exploration rate or step count - keep learning progress
     console.log('Robot position state reset (model and training data preserved)')
   }
 
@@ -346,6 +410,12 @@ export class BossController {
     this.sensorHistory = []
     this.isTraining = false
     this.isInitialized = false
+    this.explorationRate = 0.8
+    this.stepCount = 0
+    this.lastFitness = 0
+    this.fitnessHistory = []
+    this.bestAction = null
+    this.bestFitness = 0
     console.log('Complete reset - all data cleared')
   }
 }

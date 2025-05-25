@@ -27,8 +27,13 @@ export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onC
       />
       <pointLight position={[-5, 5, -5]} intensity={0.3} />
       
-      {/* Ground - Solid floor */}
-      <RigidBody type="fixed" position={[0, -2, 0]}>
+      {/* Ground - Solid floor with proper physics material */}
+      <RigidBody 
+        type="fixed" 
+        position={[0, -2, 0]}
+        friction={1.5}
+        restitution={0.1}
+      >
         <Box args={[50, 0.2, 50]}>
           <meshStandardMaterial color="#333" />
         </Box>
