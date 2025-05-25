@@ -20,10 +20,11 @@ interface AIBossProps {
   onStateUpdate: (sensorData: number[]) => void;
   onSensorUpdate: (data: { sensors: number[]; groundContact: any; fitness: number }) => void;
   onBoundaryExit?: () => void;
+  simulationSpeed: number;
 }
 
 // AI-controlled Boss with comprehensive sensor feedback
-export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryExit }: AIBossProps) {
+export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryExit, simulationSpeed }: AIBossProps) {
   const bossRefs: BossRefs = {
     head: useRef(null),
     torso: useRef(null),
@@ -105,8 +106,9 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
     }
     const isSettled = true // Remove settling delay
 
-    // Auto-reset episode every 3 seconds for rapid learning
-    if (episodeTimer.current > 3.0) {
+    // Auto-reset episode every 3 seconds (scaled by simulation speed) for rapid learning  
+    const episodeTimeout = 3.0 / simulationSpeed
+    if (episodeTimer.current > episodeTimeout) {
       const avgEpisodeFitness = episodeSamples.current > 0 ? episodeFitnessSum.current / episodeSamples.current : 0
       episodeCount.current++
       console.log(`Episode ${episodeCount.current} complete - Avg fitness: ${avgEpisodeFitness.toFixed(2)}`)
@@ -132,8 +134,9 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
       return
     }
 
-    // Train model every 15 seconds (after several episodes)
-    if (trainingTimer.current > 15.0 && !controller.isTraining) {
+    // Train model every 15 seconds (scaled by simulation speed) after several episodes
+    const trainingTimeout = 15.0 / simulationSpeed
+    if (trainingTimer.current > trainingTimeout && !controller.isTraining) {
       controller.trainModel()
       trainingTimer.current = 0
     }

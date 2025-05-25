@@ -20,10 +20,12 @@ interface AIControlPanelProps {
   isCapturing: boolean;
   onRobotTypeChange?: (robotTypeId: string) => void;
   selectedRobotType: string;
+  simulationSpeed: number;
+  onSimulationSpeedChange: (speed: number) => void;
 }
 
 // Enhanced AI Control Panel with model export and robot selection
-export function AIControlPanel({ controller, currentState: _currentState, sensorData, onToggleCapture, isCapturing, onRobotTypeChange, selectedRobotType }: AIControlPanelProps) {
+export function AIControlPanel({ controller, currentState: _currentState, sensorData, onToggleCapture, isCapturing, onRobotTypeChange, selectedRobotType, simulationSpeed, onSimulationSpeedChange }: AIControlPanelProps) {
   const [isModelReady, setIsModelReady] = useState(false)
   const [trainingStats, setTrainingStats] = useState({ samples: 0, fitness: 0 })
   const [sensorDisplay, setSensorDisplay] = useState('basic')
@@ -74,6 +76,24 @@ export function AIControlPanel({ controller, currentState: _currentState, sensor
     <div className="absolute top-20 left-4 bg-black bg-opacity-90 text-white p-4 rounded-lg text-xs max-w-sm space-y-3 max-h-[75vh] overflow-y-auto z-50">
       <h3 className="font-bold text-green-400 text-sm">🤖 Boss AI Control</h3>
       
+      {/* Simulation Speed Control */}
+      <div className="space-y-2">
+        <label className="text-purple-300 text-xs">⚡ Simulation Speed: {simulationSpeed.toFixed(1)}x</label>
+        <input
+          type="range"
+          min="1"
+          max="10"
+          step="0.5"
+          value={simulationSpeed}
+          onChange={(e) => onSimulationSpeedChange(parseFloat(e.target.value))}
+          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider"
+        />
+        <div className="flex justify-between text-xs text-gray-400">
+          <span>1x (Real-time)</span>
+          <span>10x (Fast)</span>
+        </div>
+      </div>
+
       {/* Robot Type Selection */}
       {onRobotTypeChange && (
         <div className="space-y-2">

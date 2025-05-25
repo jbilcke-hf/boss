@@ -27,6 +27,7 @@ export default function Boss() {
   const [isCapturing, setIsCapturing] = useState(false)
   const [captureCount, setCaptureCount] = useState(0)
   const [selectedRobotType, setSelectedRobotType] = useState('biped')
+  const [simulationSpeed, setSimulationSpeed] = useState(1.0)
 
   useEffect(() => {
     setIsClient(true)
@@ -88,6 +89,11 @@ export default function Boss() {
     console.log('Robot type changed to:', robotTypeId)
   }
 
+  const handleSimulationSpeedChange = (speed: number) => {
+    setSimulationSpeed(speed)
+    console.log(`Simulation speed changed to: ${speed}x`)
+  }
+
   if (!isClient) {
     return (
       <div className="w-full h-screen flex items-center justify-center bg-gray-900 text-white">
@@ -134,6 +140,8 @@ export default function Boss() {
         isCapturing={isCapturing}
         onRobotTypeChange={handleRobotTypeChange}
         selectedRobotType={selectedRobotType}
+        simulationSpeed={simulationSpeed}
+        onSimulationSpeedChange={handleSimulationSpeedChange}
       />
 
       {/* 3D Canvas */}
@@ -159,6 +167,7 @@ export default function Boss() {
           onSensorUpdate={handleSensorUpdate}
           onCapture={handleCapture}
           isCapturing={isCapturing}
+          simulationSpeed={simulationSpeed}
         />
       </Canvas>
     </div>

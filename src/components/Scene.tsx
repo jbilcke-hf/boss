@@ -11,12 +11,20 @@ interface SceneProps {
   onSensorUpdate: (data: { sensors: number[]; groundContact: any; fitness: number }) => void;
   onCapture: (pixels: Uint8Array) => void;
   isCapturing: boolean;
+  simulationSpeed: number;
 }
 
 // Main scene with enhanced AI and sensor feedback
-export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onCapture, isCapturing }: SceneProps) {
+export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onCapture, isCapturing, simulationSpeed }: SceneProps) {
   return (
-    <Physics gravity={[0, -9.81, 0]} debug={false}>
+    <Physics 
+      gravity={[0, -9.81, 0]} 
+      debug={false}
+      timeStep={1/60 * simulationSpeed}
+      maxVelocityIterations={Math.ceil(4 * simulationSpeed)}
+      maxVelocityFrictionIterations={Math.ceil(1 * simulationSpeed)}
+      maxStabilizationIterations={Math.ceil(1 * simulationSpeed)}
+    >
       <ambientLight intensity={0.4} />
       <directionalLight 
         position={[5, 8, 5]} 
@@ -62,6 +70,7 @@ export function Scene({ resetKey, controller, onStateUpdate, onSensorUpdate, onC
         controller={controller} 
         onStateUpdate={onStateUpdate}
         onSensorUpdate={onSensorUpdate}
+        simulationSpeed={simulationSpeed}
         onBoundaryExit={() => {
           // Trigger a reset by incrementing the resetKey
           window.dispatchEvent(new CustomEvent('ragdollBoundaryExit'))
