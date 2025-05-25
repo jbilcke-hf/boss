@@ -105,6 +105,11 @@ export function AIControlPanel({ controller, currentState: _currentState, sensor
         <div>Training: {controller.isTraining ? '🎯 Active' : '⏸️ Idle'}</div>
         <div>Samples: {trainingStats.samples}</div>
         <div>Fitness: {trainingStats.fitness}</div>
+        {trainingStats.samples > 0 && (
+          <div className="text-green-300 text-xs">
+            📚 Learning from {trainingStats.samples} attempts
+          </div>
+        )}
       </div>
 
       {sensorData && (
@@ -198,8 +203,14 @@ export function AIControlPanel({ controller, currentState: _currentState, sensor
         </div>
       )}
 
-      <div className="text-xs text-gray-300">
-        💡 Train → Export → Share your AI models!
+      <div className="text-xs text-gray-300 space-y-1">
+        <div>💡 Train → Export → Share your AI models!</div>
+        <div className="border-t border-gray-600 pt-2 mt-2">
+          <div className="text-yellow-300">🔄 Reset Types:</div>
+          <div>🔄 Position: Robot only (keeps learning)</div>
+          <div>🧠 Model: Neural net only (keeps data)</div>
+          <div>💥 All: Fresh start</div>
+        </div>
       </div>
     </div>
   )

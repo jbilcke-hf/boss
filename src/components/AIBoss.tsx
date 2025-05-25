@@ -39,7 +39,7 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
   const lastSensorData = useRef(null)
   const actionTimer = useRef(0)
   const lastFrameTime = useRef(performance.now())
-  const settlingTime = useRef(0)
+  const initializationDone = useRef(false)
   
   // Boundary limits for training area
   const BOUNDARY_LIMITS = {
@@ -82,24 +82,30 @@ export function AIBoss({ controller, onStateUpdate, onSensorUpdate, onBoundaryEx
     }
 
     actionTimer.current += delta
-    settlingTime.current += delta
     const currentTime = performance.now()
     const actualDelta = (currentTime - lastFrameTime.current) / 1000
     lastFrameTime.current = currentTime
 
-    // Wait 2 seconds for ragdoll to settle before AI takes control
-    const isSettled = settlingTime.current > 2.0
+    // Initialize AI immediately and start balancing
+    if (!initializationDone.current) {
+      if (!controller.isInitialized) {
+        controller.createModel()
+      }
+      initializationDone.current = true
+    }
+    const isSettled = true // Remove settling delay
 
     // Update AI every 0.05 seconds (20Hz) for more responsive control
     if (actionTimer.current > 0.05 && isSettled) {
       const sensorData = controller.getSensorData(bossRefs, actualDelta)
       
       if (sensorData) {
+        const fitness = controller.calculateFitness(sensorData)
         onStateUpdate(sensorData)
         onSensorUpdate({
           sensors: sensorData.slice(0, 24),
           groundContact: (sensorData as any).groundContact,
-          fitness: controller.calculateFitness(sensorData)
+          fitness: fitness
         })
       }
 

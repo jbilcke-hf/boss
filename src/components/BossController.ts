@@ -207,9 +207,9 @@ export class BossController {
     return this.getSensorData(bossRefs, deltaTime)
   }
 
-  // Enhanced fitness function using sensor data - rewards upright standing and stability
+  // Enhanced fitness function using sensor data - starts at perfect score, degrades as robot falls
   calculateFitness(sensorData: number[]): number {
-    if (!sensorData || sensorData.length < 24) return 0
+    if (!sensorData || sensorData.length < 24) return 100 // Start with perfect score
     
     const [headY, torsoY, _leftThighY, _rightThighY, centerMassY, torsoX,
            _headVelX, _headVelY, _headVelZ, torsoVelX, torsoVelY, torsoVelZ,
@@ -217,46 +217,47 @@ export class BossController {
            rotX, _rotY, rotZ, _rotW, angVelX, angVelZ,
            leftKneeAngle, rightKneeAngle] = sensorData
 
+    // Start with perfect fitness and subtract penalties
+    let fitness = 100.0
+
     // Target heights for optimal standing position
     const targetHeadHeight = 1.8   // Expected head height when standing
     const targetTorsoHeight = 1.0  // Expected torso height when standing
-    const stabilityZone = 2.0      // Allowed movement zone radius
     
-    // Primary fitness: Head height (most important - head up indicates standing)
-    const headHeightScore = headY > targetHeadHeight * 0.8 ? 
-      Math.max(0, 50 - Math.abs(headY - targetHeadHeight) * 20) : 0
+    // Height penalties - lose points as robot falls
+    const headHeightPenalty = headY < targetHeadHeight * 0.8 ? 
+      Math.min(30, (targetHeadHeight - headY) * 15) : 0
     
-    // Torso height bonus (secondary indicator of standing)
-    const torsoHeightScore = torsoY > targetTorsoHeight * 0.7 ? 
-      Math.max(0, 30 - Math.abs(torsoY - targetTorsoHeight) * 15) : 0
+    const torsoHeightPenalty = torsoY < targetTorsoHeight * 0.7 ? 
+      Math.min(25, (targetTorsoHeight - torsoY) * 20) : 0
     
-    // Stability zone reward - staying within allowed area
-    const distanceFromCenter = Math.sqrt(torsoX * torsoX + (centerMassY - targetTorsoHeight) * (centerMassY - targetTorsoHeight))
-    const stabilityZoneBonus = Math.max(0, 20 * (1 - Math.min(1, distanceFromCenter / stabilityZone)))
+    // Position stability penalty - lose points for drifting from center
+    const positionDrift = Math.sqrt(torsoX * torsoX + (centerMassY - targetTorsoHeight) * (centerMassY - targetTorsoHeight))
+    const positionPenalty = Math.min(15, positionDrift * 2)
     
-    // Movement penalties - reward staying relatively still
+    // Movement penalty - lose points for excessive motion
     const velocityMagnitude = Math.sqrt(torsoVelX * torsoVelX + torsoVelY * torsoVelY + torsoVelZ * torsoVelZ)
-    const velocityPenalty = Math.max(0, velocityMagnitude - 0.5) * -10  // Allow small movements
+    const velocityPenalty = Math.min(10, Math.max(0, velocityMagnitude - 0.3) * 8)
     
-    // Angular stability - penalize excessive rotation/wobbling
-    const angularStability = Math.max(0, 15 - (Math.abs(angVelX) + Math.abs(angVelZ)) * 5)
+    // Angular instability penalty - lose points for wobbling/rotating
+    const angularPenalty = Math.min(15, (Math.abs(angVelX) + Math.abs(angVelZ)) * 3)
     
-    // Upright orientation bonus - torso should be vertical
-    const uprightScore = Math.max(0, 15 * (1 - Math.abs(rotX) - Math.abs(rotZ)))
+    // Orientation penalty - lose points for tilting
+    const orientationPenalty = Math.min(15, (Math.abs(rotX) + Math.abs(rotZ)) * 25)
     
-    // Ground contact is essential for standing
-    const groundContactBonus = (sensorData as any).groundContact?.both ? 15 : 
-                              ((sensorData as any).groundContact?.left || (sensorData as any).groundContact?.right) ? 5 : -20
+    // Ground contact penalty - heavy penalty for losing foot contact
+    const groundContactPenalty = !(sensorData as any).groundContact?.both ? 
+      (!(sensorData as any).groundContact?.left && !(sensorData as any).groundContact?.right ? 25 : 10) : 0
     
-    // Reasonable joint angles (not too bent or extended)
-    const jointStabilityBonus = Math.max(0, 10 - Math.abs(leftKneeAngle) * 3 - Math.abs(rightKneeAngle) * 3)
+    // Joint angle penalty - lose points for unnatural poses
+    const jointPenalty = Math.min(10, (Math.abs(leftKneeAngle) + Math.abs(rightKneeAngle)) * 2)
     
-    // Combine all fitness components with emphasis on standing upright
-    const totalFitness = headHeightScore + torsoHeightScore + stabilityZoneBonus + 
-                        velocityPenalty + angularStability + uprightScore + 
-                        groundContactBonus + jointStabilityBonus
+    // Apply all penalties
+    fitness -= (headHeightPenalty + torsoHeightPenalty + positionPenalty + 
+               velocityPenalty + angularPenalty + orientationPenalty + 
+               groundContactPenalty + jointPenalty)
 
-    return Math.max(0, totalFitness)
+    return Math.max(0, fitness)
   }
 
   // Generate enhanced motor control actions
@@ -315,5 +316,36 @@ export class BossController {
       ys.dispose()
       this.isTraining = false
     }
+  }
+
+  // Reset only the neural network model (not the training data)
+  resetModel(): void {
+    if (this.model) {
+      this.model.dispose()
+      this.model = null
+    }
+    this.createModel()
+    console.log('Neural network model reset (training data preserved)')
+  }
+
+  // Reset only position-related state (for robot resets without losing training progress)
+  resetPositionState(): void {
+    this.previousState = null
+    this.sensorHistory = []
+    console.log('Robot position state reset (model and training data preserved)')
+  }
+
+  // Complete reset - clears everything (for when user wants to start over)
+  resetAll(): void {
+    if (this.model) {
+      this.model.dispose()
+      this.model = null
+    }
+    this.trainingData = []
+    this.previousState = null
+    this.sensorHistory = []
+    this.isTraining = false
+    this.isInitialized = false
+    console.log('Complete reset - all data cleared')
   }
 }

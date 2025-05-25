@@ -52,9 +52,18 @@ export default function Boss() {
 
   const handleReset = () => {
     setResetKey(prev => prev + 1)
-    controller.trainingData = [] // Clear training data on reset
-    controller.previousState = null // Reset sensor history
-    controller.sensorHistory = []
+    controller.resetPositionState() // Only reset position, keep training data
+  }
+
+  const handleModelReset = () => {
+    controller.resetModel()
+    console.log('Neural network model reset - training data preserved')
+  }
+
+  const handleCompleteReset = () => {
+    setResetKey(prev => prev + 1)
+    controller.resetAll()
+    console.log('Complete reset - starting fresh')
   }
 
   const handleSensorUpdate = useCallback((newSensorData: SensorData) => {
@@ -94,13 +103,27 @@ export default function Boss() {
 
   return (
     <div className="w-full h-screen bg-gray-900 overflow-hidden">
-      {/* Reset Button */}
-      <button
-        onClick={handleReset}
-        className="absolute top-16 right-4 z-20 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors duration-200 shadow-lg"
-      >
-        Reset {currentRobotType.name}
-      </button>
+      {/* Reset Controls */}
+      <div className="absolute top-16 right-4 z-20 flex flex-col gap-2">
+        <button
+          onClick={handleReset}
+          className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 shadow-lg"
+        >
+          🔄 Reset Position
+        </button>
+        <button
+          onClick={handleModelReset}
+          className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 shadow-lg"
+        >
+          🧠 Reset Model
+        </button>
+        <button
+          onClick={handleCompleteReset}
+          className="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 shadow-lg"
+        >
+          💥 Reset All
+        </button>
+      </div>
 
       {/* Enhanced AI Control Panel */}
       <AIControlPanel 
